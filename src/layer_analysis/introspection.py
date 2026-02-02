@@ -25,7 +25,6 @@ def load_module_class(
     identifier : str
         Module identifier in format "module.path@ClassName".
         Examples:
-        - "models.abstractor@RelationalAttention"
         - "torch.nn@Linear"
     prefix : str
         Optional prefix to prepend to module path.
@@ -48,8 +47,8 @@ def load_module_class(
 
     Examples
     --------
-    >>> cls = load_module_class("models.abstractor@RelationalAttention")
-    >>> module = cls(d_model=64, n_heads=4)
+    >>> cls = load_module_class("torch.nn@Linear")
+    >>> module = cls(in_features=16, out_features=32)
     """
     from .errors import ModuleLoadError
 

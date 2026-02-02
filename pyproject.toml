@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layer-analysis"
+version = "0.1.0"
+description = "Architecture-agnostic toolkit for analyzing PyTorch module initialization."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+  { name = "Torch Init Lens Contributors" }
+]
+keywords = ["pytorch", "initialization", "analysis", "deep-learning", "diagnostics"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+dependencies = [
+  "numpy>=1.22",
+  "PyYAML>=6.0",
+  "torch>=2.0"
+]
+
+[project.optional-dependencies]
+notebook = [
+  "nbconvert>=7.0",
+  "nbformat>=5.0"
+]
+plots = [
+  "matplotlib>=3.7",
+  "pandas>=2.0"
+]
+dev = [
+  "pytest>=7.0",
+  "pytest-cov>=4.0"
+]
+
+[project.scripts]
+layer-analysis = "layer_analysis.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/torch-init-lens/torch-init-lens"
+Source = "https://github.com/torch-init-lens/torch-init-lens"
+Issues = "https://github.com/torch-init-lens/torch-init-lens/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+layer_analysis = ["defaults.yaml"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

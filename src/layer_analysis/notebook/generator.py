@@ -26,7 +26,7 @@ class NotebookGenerator:
     Parameters
     ----------
     module_identifier : str
-        Module identifier (e.g., "models.abstractor@RelationalAttention").
+        Module identifier (e.g., "torch.nn@Linear").
     config : AnalysisConfig
         Analysis configuration.
     module_kwargs : Optional[Dict[str, Any]]
@@ -34,9 +34,13 @@ class NotebookGenerator:
 
     Examples
     --------
-    >>> from utilities.layer_analysis import AnalysisConfig
-    >>> config = AnalysisConfig(input_shape=(2, 16, 64))
-    >>> generator = NotebookGenerator("models.abstractor@DualAttention", config)
+    >>> from layer_analysis import AnalysisConfig
+    >>> config = AnalysisConfig(input_shape=(2, 16))
+    >>> generator = NotebookGenerator(
+    ...     "torch.nn@Linear",
+    ...     config,
+    ...     module_kwargs={"in_features": 16, "out_features": 32},
+    ... )
     >>> generator.generate(Path("analysis.ipynb"))
     """
 

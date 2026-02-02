@@ -3,21 +3,22 @@ Command-Line Interface for Module Initialization Analysis.
 
 Usage:
     # Single-input module
-    python -m utilities.layer_analysis analyze models.abstractor@DualAttention --input-shape 2,16,64
+    python -m layer_analysis analyze torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
 
-    # Multi-input module (e.g., RelationalAttention needs x and symbols)
-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
-        --input-shapes x:2,16,64 symbols:2,16,64
+    # Multi-input module (e.g., MultiheadAttention expects query/key/value)
+    python -m layer_analysis analyze torch.nn@MultiheadAttention \
+        --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
+        --module-kwargs embed_dim=32 num_heads=4
 
     # Module with custom kwargs
-    python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \
-        --input-shapes x:2,16,64 --module-kwargs n_symbols=100
+    python -m layer_analysis analyze torch.nn@LayerNorm \
+        --input-shape 2,16 --module-kwargs normalized_shape=16
 
-    # Generate notebook (default output: tests/layer_analysis/DualAttention.ipynb)
-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention
+    # Generate notebook (default output: tests/layer_analysis/{module_name}.ipynb)
+    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
 
     # Generate Python script
-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention --output-format py -o analysis.py
+    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --output-format py -o analysis.py
 """
 
 import argparse
@@ -200,21 +201,22 @@ def create_parser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
     # Single-input module with custom shape
-    python -m utilities.layer_analysis analyze models.abstractor@DualAttention --input-shape 4,32,128
+    python -m layer_analysis analyze torch.nn@Linear --input-shape 4,32 --module-kwargs in_features=32 out_features=64
 
-    # Multi-input module (e.g., RelationalAttention needs x and symbols)
-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \\
-        --input-shapes x:2,16,64 symbols:2,16,64
+    # Multi-input module (e.g., MultiheadAttention expects query/key/value)
+    python -m layer_analysis analyze torch.nn@MultiheadAttention \\
+        --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \\
+        --module-kwargs embed_dim=32 num_heads=4
 
     # Module with custom kwargs
-    python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \\
-        --input-shapes x:2,16,64 --module-kwargs n_symbols=100
+    python -m layer_analysis analyze torch.nn@LayerNorm \\
+        --input-shape 2,16 --module-kwargs normalized_shape=16
 
-    # Generate Jupyter notebook (default output: tests/layer_analysis/DualAttention.ipynb)
-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention
+    # Generate Jupyter notebook (default output: tests/layer_analysis/{module_name}.ipynb)
+    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
 
     # Generate Python script
-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention --output-format py -o analysis.py
+    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --output-format py -o analysis.py
         """,
     )
 
@@ -286,7 +288,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "module",
         type=str,
-        help="Module identifier (e.g., 'models.abstractor@RelationalAttention')",
+        help="Module identifier (e.g., 'torch.nn@Linear')",
     )
     # Support both single shape (backward compat) and multiple shapes
     shape_group = parser.add_mutually_exclusive_group()

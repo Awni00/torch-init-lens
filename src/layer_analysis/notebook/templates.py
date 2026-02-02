@@ -66,7 +66,7 @@ def get_title_cells(
     Parameters
     ----------
     module_identifier : str
-        Module identifier (e.g., "models.abstractor@RelationalAttention").
+        Module identifier (e.g., "torch.nn@Linear").
     input_shapes : Dict[str, Tuple[int, ...]]
         Input tensor shapes.
     device : str
@@ -125,9 +125,8 @@ from pathlib import Path
 
 # Add project root to path
 project_root = Path(os.getcwd())
-while not (project_root / "models").exists() and project_root.parent != project_root:
-    project_root = project_root.parent
-sys.path.insert(0, str(project_root))
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import torch
 import torch.nn as nn

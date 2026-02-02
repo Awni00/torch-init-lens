@@ -19,8 +19,8 @@ class AnalysisConfig:
     input_shapes : Dict[str, Tuple[int, ...]]
         Mapping of input parameter names to their shapes.
         For single-input modules, use {"x": (batch, seq, d_model)}.
-        For multi-input modules like RelationalAttention, use
-        {"x": (2, 16, 64), "symbols": (2, 16, 64)}.
+        For multi-input modules (e.g., query/key/value), use
+        {"query": (2, 8, 32), "key": (2, 8, 32), "value": (2, 8, 32)}.
     input_shape : Optional[Tuple[int, ...]]
         Backwards-compatible alias for a single input shape. If provided, it
         overrides input_shapes.

@@ -318,7 +318,7 @@ class OperatorNormEstimator(BaseAnalyzer):
             ),
             self._create_code_cell(
                 f'''
-from utilities.layer_analysis.inputs import InputGenerator
+from layer_analysis.inputs import InputGenerator
 import numpy as np
 
 # Input generator

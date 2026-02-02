@@ -20,32 +20,34 @@ This package helps verify that newly implemented modules are well-behaved at ini
 
 ```bash
 # Single-input module
-python -m utilities.layer_analysis analyze models.abstractor@DualAttention \
-    --input-shape 2,16,64
+python -m layer_analysis analyze torch.nn@Linear \
+    --input-shape 2,16 --module-kwargs in_features=16 out_features=32
 
-# Multi-input module (e.g., RelationalAttention needs x and symbols)
-python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
-    --input-shapes x:2,16,64 symbols:2,16,64
+# Multi-input module (e.g., MultiheadAttention expects query/key/value)
+python -m layer_analysis analyze torch.nn@MultiheadAttention \
+    --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
+    --module-kwargs embed_dim=32 num_heads=4
 
 # Module with custom kwargs
-python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \
-    --input-shapes x:2,16,64 --module-kwargs n_symbols=100
+python -m layer_analysis analyze torch.nn@LayerNorm \
+    --input-shape 2,16 --module-kwargs normalized_shape=16
 
 # Generate Jupyter notebook for interactive analysis
-python -m utilities.layer_analysis generate-notebook models.abstractor@SymbolicAttention \
-    --input-shapes x:2,16,64 --module-kwargs n_symbols=100 \
+python -m layer_analysis generate-notebook torch.nn@LayerNorm \
+    --input-shape 2,16 --module-kwargs normalized_shape=16 \
     -o analysis.ipynb
 
 # Generate and run Jupyter notebook
-python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention \
-    --input-shape 2,16,64 --run
+python -m layer_analysis generate-notebook torch.nn@Linear \
+    --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --run
 
 # Generate Python script
-python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention \
+python -m layer_analysis generate-notebook torch.nn@Linear \
+    --input-shape 2,16 --module-kwargs in_features=16 out_features=32 \
     --output-format py -o analysis.py
 
 # List available analyses
-python -m utilities.layer_analysis list-analyses
+python -m layer_analysis list-analyses
 ```
 
 ### CLI Options
@@ -65,27 +67,32 @@ python -m utilities.layer_analysis list-analyses
 ## Programmatic Usage
 
 ```python
-from utilities.layer_analysis.runner import run_analysis, AnalysisRunner
-from utilities.layer_analysis.config import AnalysisConfig
+from layer_analysis.runner import run_analysis, AnalysisRunner
+from layer_analysis.config import AnalysisConfig
 
 # Quick analysis with convenience function
 results = run_analysis(
-    "models.abstractor@RelationalAttention",
-    input_shapes={"x": (2, 16, 64), "symbols": (2, 16, 64)},
-    device="cuda",
+    "torch.nn@Linear",
+    input_shapes={"x": (2, 16)},
+    device="cpu",
+    module_kwargs={"in_features": 16, "out_features": 32},
 )
 
 # Full control with AnalysisRunner
 config = AnalysisConfig(
-    input_shapes={"x": (2, 16, 64), "symbols": (2, 16, 64)},
-    device="cuda",
+    input_shapes={"x": (2, 16)},
+    device="cpu",
     dtype="float32",
     n_samples=100,
     run_spectral_analysis=True,
     run_lipschitz=False,  # Disable specific analyses
 )
 
-runner = AnalysisRunner("models.abstractor@RelationalAttention", config)
+runner = AnalysisRunner(
+    "torch.nn@Linear",
+    config,
+    module_kwargs={"in_features": 16, "out_features": 32},
+)
 results = runner.run_all()
 runner.print_summary(results)
 
@@ -97,7 +104,7 @@ runner.save_markdown(results, "results.md")
 ## Package Structure
 
 ```
-layer_analysis/
+src/layer_analysis/
 ├── __init__.py
 ├── __main__.py          # Entry point for python -m
 ├── cli.py               # Command-line interface

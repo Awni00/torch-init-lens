@@ -293,7 +293,7 @@ def safe_forward(
     --------
     >>> # Single input
     >>> out = safe_forward(module, x)
-    >>> # Multiple inputs (e.g., RelationalAttention)
+    >>> # Multiple inputs (e.g., query/key/value)
     >>> out = safe_forward(module, x, symbols)
     """
     try:

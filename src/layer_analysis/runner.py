@@ -59,7 +59,7 @@ class AnalysisRunner:
     Parameters
     ----------
     module_identifier : str
-        Module identifier (e.g., "models.abstractor@RelationalAttention").
+        Module identifier (e.g., "torch.nn@Linear").
     config : AnalysisConfig
         Analysis configuration.
     module_kwargs : Optional[Dict[str, Any]]
@@ -67,8 +67,12 @@ class AnalysisRunner:
 
     Examples
     --------
-    >>> config = AnalysisConfig(input_shape=(2, 16, 64))
-    >>> runner = AnalysisRunner("models.abstractor@DualAttention", config)
+    >>> config = AnalysisConfig(input_shape=(2, 16))
+    >>> runner = AnalysisRunner(
+    ...     "torch.nn@Linear",
+    ...     config,
+    ...     module_kwargs={"in_features": 16, "out_features": 32},
+    ... )
     >>> results = runner.run_all()
     >>> runner.print_summary(results)
     """

@@ -1,0 +1,1846 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..3607b0f83c71accdca0b558e4dc90f72312d8ee1
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,31 @@
++name: CI
++
++on:
++  push:
++    branches: ["main", "master"]
++  pull_request:
++
++jobs:
++  tests:
++    runs-on: ubuntu-latest
++    strategy:
++      fail-fast: false
++      matrix:
++        python-version: ["3.9", "3.10", "3.11", "3.12"]
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: ${{ matrix.python-version }}
++          cache: "pip"
++
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install -e .[dev]
++
++      - name: Run tests
++        run: pytest
+diff --git a/.github/workflows/publish.yml b/.github/workflows/publish.yml
+new file mode 100644
+index 0000000000000000000000000000000000000000..b49cf80773eb604bcc55b4344ce1cbe16c26c010
+--- /dev/null
++++ b/.github/workflows/publish.yml
+@@ -0,0 +1,33 @@
++name: Publish
++
++on:
++  release:
++    types: ["published"]
++  workflow_dispatch:
++
++jobs:
++  build-and-publish:
++    runs-on: ubuntu-latest
++    permissions:
++      id-token: write
++      contents: read
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Set up Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: "3.11"
++          cache: "pip"
++
++      - name: Build package
++        run: |
++          python -m pip install --upgrade pip
++          python -m pip install build
++          python -m build
++
++      - name: Publish to PyPI
++        uses: pypa/gh-action-pypi-publish@release/v1
++        with:
++          print-hash: true
+diff --git a/README.md b/README.md
+index 48714b5e9a4ce49402bdb66c4808e4067d415300..9fdc311fb56f61f1a4a39566f5b7c9a7fc9da495 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1,98 @@
+-# torch-init-lens
+\ No newline at end of file
++# Layer Analysis (torch-init-lens)
++
++A self-contained toolkit for analyzing PyTorch module initialization properties, including parameter norms, gradients, spectral properties, and numerical stability. The package is architecture-agnostic: you can point it at any `torch.nn.Module` (or custom module on your PYTHONPATH) using a simple `module.path@ClassName` identifier.
++
++## Installation
++
++```bash
++pip install layer-analysis
++```
++
++Optional extras:
++
++```bash
++# For notebook generation/execution
++pip install "layer-analysis[notebook]"
++
++# For plotting helpers in analyzers
++pip install "layer-analysis[plots]"
++
++# For development
++pip install "layer-analysis[dev]"
++```
++
++## Quickstart
++
++### CLI
++
++```bash
++# Single-input module
++python -m layer_analysis analyze torch.nn@Linear \
++  --input-shape 2,16 --module-kwargs in_features=16 out_features=32
++
++# Multi-input module (e.g., MultiheadAttention expects query/key/value)
++python -m layer_analysis analyze torch.nn@MultiheadAttention \
++  --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
++  --module-kwargs embed_dim=32 num_heads=4
++
++# Generate a notebook
++python -m layer_analysis generate-notebook torch.nn@LayerNorm \
++  --input-shape 2,16 --module-kwargs normalized_shape=16 -o analysis.ipynb
++
++# List available analyses
++python -m layer_analysis list-analyses
++```
++
++### Programmatic
++
++```python
++from layer_analysis import AnalysisConfig, AnalysisRunner
++
++config = AnalysisConfig(
++    input_shapes={"x": (2, 16)},
++    device="cpu",
++)
++
++runner = AnalysisRunner(
++    "torch.nn@Linear",
++    config,
++    module_kwargs={"in_features": 16, "out_features": 32},
++)
++results = runner.run_all()
++runner.print_summary(results)
++```
++
++## Design choices
++
++- **Architecture-agnostic module loading:** uses `module.path@ClassName` to load any `torch.nn.Module`, including your own modules if they are importable.
++- **Self-contained analysis pipeline:** all analyzers (norms, gradients, spectral stats, Lipschitz bounds, etc.) live in a single package with minimal external assumptions.
++- **Safe defaults with configurable toggles:** you can disable heavy analyses or adjust sampling parameters via `AnalysisConfig`.
++- **Notebook and script generation:** the CLI can produce Jupyter notebooks or standalone scripts for reproducible analysis.
++
++## Project layout
++
++```
++.
++├── src/layer_analysis/        # Package source
++├── docs/                      # Extended docs
++├── examples/                  # Scripts and notebooks
++├── tests/                     # Unit tests
++└── .github/workflows/         # CI/CD automation
++```
++
++## Examples
++
++See the `examples/` directory for runnable scripts and notebook demos. The notebooks are designed to be executed after installing the package and optional notebook dependencies.
++
++## Development
++
++```bash
++python -m venv .venv
++source .venv/bin/activate
++pip install -e ".[dev]"
++pytest
++```
++
++## License
++
++MIT. See [LICENSE](LICENSE).
+diff --git a/layer-analysis-subpackage/README.md b/docs/README.md
+similarity index 77%
+rename from layer-analysis-subpackage/README.md
+rename to docs/README.md
+index c3484fb2b849028f3976de0557d186c2bd158302..919415fe20322f524f8f142df281727d75300a1b 100644
+--- a/layer-analysis-subpackage/README.md
++++ b/docs/README.md
+@@ -1,125 +1,132 @@
+ # Module Initialization Analysis
+ 
+ A toolkit for analyzing PyTorch module initialization properties, including parameter norms, gradients, spectral properties, and numerical stability.
+ 
+ ## Purpose
+ 
+ This package helps verify that newly implemented modules are well-behaved at initialization by checking:
+ 
+ - **Parameter norms**: Frobenius, operator, sup-norm, standard deviation
+ - **Operator norm**: Effective input-output ratio across various input distributions
+ - **Gradient analysis**: Gradient existence, norms, and completeness
+ - **Spectral analysis**: Singular values, spectral radius, condition number
+ - **Rank analysis**: Effective rank of weight matrices
+ - **Lipschitz estimation**: Empirical and weight-based bounds
+ - **Activation statistics**: Mean, std, max of intermediate activations
+ - **Gradient ratios**: Layer-wise gradient flow analysis
+ - **Numerical precision**: NaN/Inf checks, extreme input handling
+ 
+ ## CLI Usage
+ 
+ ```bash
+ # Single-input module
+-python -m utilities.layer_analysis analyze models.abstractor@DualAttention \
+-    --input-shape 2,16,64
++python -m layer_analysis analyze torch.nn@Linear \
++    --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+ 
+-# Multi-input module (e.g., RelationalAttention needs x and symbols)
+-python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
+-    --input-shapes x:2,16,64 symbols:2,16,64
++# Multi-input module (e.g., MultiheadAttention expects query/key/value)
++python -m layer_analysis analyze torch.nn@MultiheadAttention \
++    --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
++    --module-kwargs embed_dim=32 num_heads=4
+ 
+ # Module with custom kwargs
+-python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \
+-    --input-shapes x:2,16,64 --module-kwargs n_symbols=100
++python -m layer_analysis analyze torch.nn@LayerNorm \
++    --input-shape 2,16 --module-kwargs normalized_shape=16
+ 
+ # Generate Jupyter notebook for interactive analysis
+-python -m utilities.layer_analysis generate-notebook models.abstractor@SymbolicAttention \
+-    --input-shapes x:2,16,64 --module-kwargs n_symbols=100 \
++python -m layer_analysis generate-notebook torch.nn@LayerNorm \
++    --input-shape 2,16 --module-kwargs normalized_shape=16 \
+     -o analysis.ipynb
+ 
+ # Generate and run Jupyter notebook
+-python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention \
+-    --input-shape 2,16,64 --run
++python -m layer_analysis generate-notebook torch.nn@Linear \
++    --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --run
+ 
+ # Generate Python script
+-python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention \
++python -m layer_analysis generate-notebook torch.nn@Linear \
++    --input-shape 2,16 --module-kwargs in_features=16 out_features=32 \
+     --output-format py -o analysis.py
+ 
+ # List available analyses
+-python -m utilities.layer_analysis list-analyses
++python -m layer_analysis list-analyses
+ ```
+ 
+ ### CLI Options
+ 
+ | Option | Description |
+ |--------|-------------|
+ | `--input-shape` | Single input shape as `batch,seq,dim` (e.g., `2,16,64`) |
+ | `--input-shapes` | Multiple inputs as `name:shape` pairs (e.g., `x:2,16,64 symbols:2,16,64`) |
+ | `--module-kwargs` | Additional module init kwargs as `key=value` pairs (e.g. `n_symbols=100`) |
+ | `--loss-fn` | Loss function(s) for gradient analysis (default: `reconstruction`). Options: `sum`, `mse_random`, `reconstruction`, `variance` |
+ | `--device` | Device for analysis: `cuda` or `cpu` (default: `cuda`) |
+ | `--dtype` | Data type: `float32`, `float16`, `bfloat16` (default: `float32`) |
+ | `--n-samples` | Number of samples for statistical estimation (default: `50`) |
+ | `-o, --output` | Output file (`.json` or `.md` for analyze, required for generate-notebook) |
+ | `--run` | Execute the notebook after generation (generate-notebook only) |
+ 
+ ## Programmatic Usage
+ 
+ ```python
+-from utilities.layer_analysis.runner import run_analysis, AnalysisRunner
+-from utilities.layer_analysis.config import AnalysisConfig
++from layer_analysis.runner import run_analysis, AnalysisRunner
++from layer_analysis.config import AnalysisConfig
+ 
+ # Quick analysis with convenience function
+ results = run_analysis(
+-    "models.abstractor@RelationalAttention",
+-    input_shapes={"x": (2, 16, 64), "symbols": (2, 16, 64)},
+-    device="cuda",
++    "torch.nn@Linear",
++    input_shapes={"x": (2, 16)},
++    device="cpu",
++    module_kwargs={"in_features": 16, "out_features": 32},
+ )
+ 
+ # Full control with AnalysisRunner
+ config = AnalysisConfig(
+-    input_shapes={"x": (2, 16, 64), "symbols": (2, 16, 64)},
+-    device="cuda",
++    input_shapes={"x": (2, 16)},
++    device="cpu",
+     dtype="float32",
+     n_samples=100,
+     run_spectral_analysis=True,
+     run_lipschitz=False,  # Disable specific analyses
+ )
+ 
+-runner = AnalysisRunner("models.abstractor@RelationalAttention", config)
++runner = AnalysisRunner(
++    "torch.nn@Linear",
++    config,
++    module_kwargs={"in_features": 16, "out_features": 32},
++)
+ results = runner.run_all()
+ runner.print_summary(results)
+ 
+ # Save results
+ runner.save_json(results, "results.json")
+ runner.save_markdown(results, "results.md")
+ ```
+ 
+ ## Package Structure
+ 
+ ```
+-layer_analysis/
++src/layer_analysis/
+ ├── __init__.py
+ ├── __main__.py          # Entry point for python -m
+ ├── cli.py               # Command-line interface
+ ├── config.py            # AnalysisConfig dataclass
+ ├── runner.py            # AnalysisRunner orchestrator
+ ├── introspection.py     # Module loading and inspection utilities
+ ├── errors.py            # Custom exceptions and safe utilities
+ ├── analyzers/           # Individual analysis implementations
+ │   ├── base.py              # BaseAnalyzer abstract class
+ │   ├── parameter_norms.py   # Parameter norm analysis
+ │   ├── operator_norm.py     # Operator norm estimation
+ │   ├── gradient_analysis.py # Gradient checks
+ │   ├── spectral_analysis.py # SVD and spectral properties
+ │   ├── rank_analysis.py     # Effective rank
+ │   ├── lipschitz.py         # Lipschitz estimation
+ │   ├── activation_stats.py  # Activation statistics
+ │   ├── gradient_ratios.py   # Layer-wise gradient ratios
+ │   ├── numerical_precision.py # NaN/Inf checks
+ │   └── weight_distribution.py # Weight distribution analysis
+ ├── inputs/              # Input tensor generation
+ │   └── generators.py        # InputGenerator class
+ └── notebook/            # Notebook/script generation
+     ├── generator.py         # Jupyter notebook generator
+     └── python_generator.py  # Python script generator
+ ```
+diff --git a/layer-analysis-subpackage/docs/analyze-cli.md b/docs/layer_analysis-docs/analyze-cli.md
+similarity index 90%
+rename from layer-analysis-subpackage/docs/analyze-cli.md
+rename to docs/layer_analysis-docs/analyze-cli.md
+index 822214d55bab57a99c60906ee9b0ec568b5bef08..343cddd523c1bcc71b123aa6119ad733eb437046 100644
+--- a/layer-analysis-subpackage/docs/analyze-cli.md
++++ b/docs/layer_analysis-docs/analyze-cli.md
+@@ -1,30 +1,30 @@
+ # Layer Analysis CLI Output Documentation
+ 
+ *Version: Commit 6cfdf9853cfaba7813da7064ee01b6c7d0dc0b2e (2026-01-19)*
+ 
+-This document explains the output produced by the `utilities.layer_analysis` CLI tool. This tool is designed to verify that PyTorch modules are well-behaved at initialization, helping to catch issues like vanishing gradients, exploding activations, or poor weight distributions before training begins.
++This document explains the output produced by the `layer_analysis` CLI tool. This tool is designed to verify that PyTorch modules are well-behaved at initialization, helping to catch issues like vanishing gradients, exploding activations, or poor weight distributions before training begins.
+ 
+ ## Output Sections
+ 
+ ### 1. Parameter Norms
+ Analyzes the magnitude and scale of the model's parameters.
+ 
+ *   **Frobenius**: The L2 norm of the flattened parameter tensor. Represents the overall "energy" of the weights.
+ *   **Operator**: The spectral norm (largest singular value) for 2D matrices. For 1D tensors, it matches the Frobenius norm. This measures the maximum amplification factor of the matrix.
+ *   **Sup**: The supremum norm (maximum absolute value). Useful for checking bounds.
+ *   **Std**: Standard deviation of the parameter values.
+ *   **Mean**: Average parameter value. Should typically be close to 0 for initialized weights.
+ 
+ ### 2. Operator Norm
+ Estimates the effective operator norm of the module: $\sup_{x \neq 0} \frac{\|f(x)\|}{\|x\|}$.
+ This measures how much the module amplifies or diminishes input signals.
+ 
+ *   **Distributions**: tested against various input distributions:
+     *   `normal`: Standard Gaussian inputs.
+     *   `sparse`: Inputs with many zeros.
+     *   `large_magnitude`: Inputs with large values.
+     *   `small_magnitude`: Inputs with tiny values.
+     *   `correlated`: Inputs with high correlation between features.
+ *   **Metrics**:
+     *   **max**: The maximum amplification observed.
+     *   **mean**: The average amplification.
+@@ -79,32 +79,33 @@ Scans for numerical anomalies.
+ *   **Normal/Extreme Inputs**: Checks if outputs contain NaNs/Infs under standard or extreme input conditions.
+ *   **Gradients**: Checks if gradients contain NaNs/Infs.
+ 
+ ### 10. Weight Distribution
+ Statistical analysis of the weight values.
+ 
+ *   **Mean/Std**: Basic moments.
+ *   **Skewness**: Measure of asymmetry.
+ *   **Kurtosis**: Measure of "tailedness".
+ 
+ ## Interpreting Results
+ 
+ | Metric | Healthy Range | Warning Signs | Potential Fix |
+ | :--- | :--- | :--- | :--- |
+ | **Operator Norm** | 0.5 - 2.0 | >> 1 (Exploding)<br><< 1 (Vanishing) | Adjust init gain or use orthogonal init. |
+ | **Condition Number** | < 1000 | > 1000 (Ill-conditioned) | Use orthogonal initialization. |
+ | **Rank Ratio** | > 90% | < 50% (Low Rank) | Check for degenerate init (e.g., all zeros). |
+ | **Gradient Ratio** | 0.1 - 10 | < 0.1 (Vanishing)<br>> 10 (Exploding) | Add normalization (LayerNorm) or residual connections. |
+ | **Dead Neurons** | < 50% | > 90% (Dead ReLU) | Lower learning rate or change activation function. |
+ | **Lipschitz** | ~ 1.0 | >> 1.0 (Unstable) | Spectral normalization or gradient clipping. |
+ 
+ ## CLI Examples
+ 
+ ```bash
+ # Basic analysis
+-python -m utilities.layer_analysis analyze models.abstractor@DualAttention \
+-    --input-shape 2,16,64
++python -m layer_analysis analyze torch.nn@Linear \
++    --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+ 
+ # Analysis with multiple inputs
+-python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
+-    --input-shapes x:2,16,64 symbols:2,16,64
++python -m layer_analysis analyze torch.nn@MultiheadAttention \
++    --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
++    --module-kwargs embed_dim=32 num_heads=4
+ ```
+diff --git a/examples/README.md b/examples/README.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..0c4ab7792a2be9c261cdd5ce8d732b1ace272a7e
+--- /dev/null
++++ b/examples/README.md
+@@ -0,0 +1,25 @@
++# Examples
++
++This directory contains runnable examples and notebook demos for `layer_analysis`.
++
++## Scripts
++
++- `basic_usage.py` — programmatic analysis of a standard `torch.nn.Linear` module.
++- `custom_module.py` — a tiny custom module that you can analyze via CLI.
++
++## Running a custom module
++
++From the repository root:
++
++```bash
++python -m layer_analysis analyze examples.custom_module@TinyMLP \
++  --input-shape 2,16 --module-kwargs in_features=16 hidden_features=32 out_features=8
++```
++
++## Notebooks
++
++The `notebooks/` folder includes a `quickstart.ipynb` demo that mirrors the basic usage script. Install the optional notebook dependencies before running:
++
++```bash
++pip install "layer-analysis[notebook]"
++```
+diff --git a/examples/basic_usage.py b/examples/basic_usage.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0e97b654b6747741c1daf935ff6e87e686eaf1e
+--- /dev/null
++++ b/examples/basic_usage.py
+@@ -0,0 +1,20 @@
++"""Basic programmatic usage example for layer_analysis."""
++
++from layer_analysis import AnalysisConfig, AnalysisRunner
++
++
++def main() -> None:
++    config = AnalysisConfig(input_shapes={"x": (2, 16)}, device="cpu")
++
++    runner = AnalysisRunner(
++        "torch.nn@Linear",
++        config,
++        module_kwargs={"in_features": 16, "out_features": 32},
++    )
++
++    results = runner.run_all()
++    runner.print_summary(results)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/custom_module.py b/examples/custom_module.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6e73286cd30891e2036644948af815e83b90e7bf
+--- /dev/null
++++ b/examples/custom_module.py
+@@ -0,0 +1,16 @@
++"""Custom module example for CLI-based analysis."""
++
++from torch import nn
++
++
++class TinyMLP(nn.Module):
++    def __init__(self, in_features: int, hidden_features: int, out_features: int) -> None:
++        super().__init__()
++        self.net = nn.Sequential(
++            nn.Linear(in_features, hidden_features),
++            nn.ReLU(),
++            nn.Linear(hidden_features, out_features),
++        )
++
++    def forward(self, x):
++        return self.net(x)
+diff --git a/examples/notebooks/quickstart.ipynb b/examples/notebooks/quickstart.ipynb
+new file mode 100644
+index 0000000000000000000000000000000000000000..be8de06a74e822fe8cb1c46dc712e938e31da0c2
+--- /dev/null
++++ b/examples/notebooks/quickstart.ipynb
+@@ -0,0 +1,40 @@
++{
++  "cells": [
++    {
++      "cell_type": "markdown",
++      "metadata": {},
++      "source": [
++        "# Layer Analysis Quickstart\n",
++        "\n",
++        "This notebook demonstrates how to run a basic initialization analysis on a simple `torch.nn.Linear` module."
++      ]
++    },
++    {
++      "cell_type": "code",
++      "execution_count": null,
++      "metadata": {},
++      "outputs": [],
++      "source": [
++        "from layer_analysis import AnalysisConfig, AnalysisRunner\n",
++        "\n",
++        "config = AnalysisConfig(input_shapes={\"x\": (2, 16)}, device=\"cpu\")\n",
++        "runner = AnalysisRunner(\"torch.nn@Linear\", config, module_kwargs={\"in_features\": 16, \"out_features\": 32})\n",
++        "results = runner.run_all()\n",
++        "runner.print_summary(results)"
++      ]
++    }
++  ],
++  "metadata": {
++    "kernelspec": {
++      "display_name": "Python 3",
++      "language": "python",
++      "name": "python3"
++    },
++    "language_info": {
++      "name": "python",
++      "version": "3.11"
++    }
++  },
++  "nbformat": 4,
++  "nbformat_minor": 5
++}
+diff --git a/layer-analysis-subpackage/__main__.py b/layer-analysis-subpackage/__main__.py
+deleted file mode 100644
+index 87044db733f6fe2b6bbe14225b045b94b9442edd..0000000000000000000000000000000000000000
+--- a/layer-analysis-subpackage/__main__.py
++++ /dev/null
+@@ -1,13 +0,0 @@
+-"""
+-Main entry point for running layer_analysis as a package.
+-
+-Usage:
+-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention -o analysis.ipynb
+-"""
+-
+-import sys
+-from .cli import main
+-
+-if __name__ == "__main__":
+-    sys.exit(main())
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab2fa7387cf2a1316f18a1ffdf4078d530286d90
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,68 @@
++[build-system]
++requires = ["setuptools>=68", "wheel"]
++build-backend = "setuptools.build_meta"
++
++[project]
++name = "layer-analysis"
++version = "0.1.0"
++description = "Architecture-agnostic toolkit for analyzing PyTorch module initialization."
++readme = "README.md"
++requires-python = ">=3.9"
++license = { text = "MIT" }
++authors = [
++  { name = "Torch Init Lens Contributors" }
++]
++keywords = ["pytorch", "initialization", "analysis", "deep-learning", "diagnostics"]
++classifiers = [
++  "Development Status :: 3 - Alpha",
++  "Intended Audience :: Science/Research",
++  "License :: OSI Approved :: MIT License",
++  "Programming Language :: Python :: 3",
++  "Programming Language :: Python :: 3 :: Only",
++  "Programming Language :: Python :: 3.9",
++  "Programming Language :: Python :: 3.10",
++  "Programming Language :: Python :: 3.11",
++  "Programming Language :: Python :: 3.12",
++  "Topic :: Scientific/Engineering :: Artificial Intelligence"
++]
++
++dependencies = [
++  "numpy>=1.22",
++  "PyYAML>=6.0",
++  "torch>=2.0"
++]
++
++[project.optional-dependencies]
++notebook = [
++  "nbconvert>=7.0",
++  "nbformat>=5.0"
++]
++plots = [
++  "matplotlib>=3.7",
++  "pandas>=2.0"
++]
++dev = [
++  "pytest>=7.0",
++  "pytest-cov>=4.0"
++]
++
++[project.scripts]
++layer-analysis = "layer_analysis.cli:main"
++
++[project.urls]
++Homepage = "https://github.com/torch-init-lens/torch-init-lens"
++Source = "https://github.com/torch-init-lens/torch-init-lens"
++Issues = "https://github.com/torch-init-lens/torch-init-lens/issues"
++
++[tool.setuptools]
++package-dir = {"" = "src"}
++
++[tool.setuptools.packages.find]
++where = ["src"]
++
++[tool.setuptools.package-data]
++layer_analysis = ["defaults.yaml"]
++
++[tool.pytest.ini_options]
++addopts = "-ra"
++testpaths = ["tests"]
+diff --git a/layer-analysis-subpackage/__init__.py b/src/layer_analysis/__init__.py
+similarity index 58%
+rename from layer-analysis-subpackage/__init__.py
+rename to src/layer_analysis/__init__.py
+index 1a866792ee83677d6e8934d74a32c0fa595075c6..5793990fb90da3973d0ad70db7d92abb6eb0ba9f 100644
+--- a/layer-analysis-subpackage/__init__.py
++++ b/src/layer_analysis/__init__.py
+@@ -1,46 +1,53 @@
+ """
+ Module Initialization Analysis Package
+ 
+ A self-contained sub-package for analyzing PyTorch module initialization properties.
+ Provides reusable analysis utilities and CLI tools for generating analysis notebooks.
+ 
+ Usage:
+     # CLI usage
+-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention -o analysis.ipynb
++    python -m layer_analysis analyze torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
++    python -m layer_analysis generate-notebook torch.nn@LayerNorm --input-shape 2,16 -o analysis.ipynb
+ 
+     # Programmatic usage
+-    from utilities.layer_analysis import AnalysisRunner, AnalysisConfig
+-    from utilities.layer_analysis.analyzers import ParameterNormAnalyzer
++    from layer_analysis import AnalysisRunner, AnalysisConfig
++    from layer_analysis.analyzers import ParameterNormAnalyzer
+ 
+-    config = AnalysisConfig(input_shape=(2, 16, 64), device="cuda")
+-    runner = AnalysisRunner("models.abstractor@DualAttention", config)
++    config = AnalysisConfig(input_shape=(2, 16), device="cpu")
++    runner = AnalysisRunner(
++        "torch.nn@Linear",
++        config,
++        module_kwargs={"in_features": 16, "out_features": 32},
++    )
+     results = runner.run_all()
+ """
+ 
+ from .config import AnalysisConfig
+ from .introspection import load_module_class, get_module_signature, detect_module_type
++from .runner import AnalysisRunner, run_analysis
+ from .errors import (
+     ModuleAnalysisError,
+     ModuleLoadError,
+     IncompatibleModuleError,
+     NumericalInstabilityError,
+     GradientError,
+ )
+ 
+ __version__ = "0.1.0"
+ 
+ __all__ = [
+     # Config
+     "AnalysisConfig",
++    "AnalysisRunner",
++    "run_analysis",
+     # Introspection
+     "load_module_class",
+     "get_module_signature",
+     "detect_module_type",
+     # Errors
+     "ModuleAnalysisError",
+     "ModuleLoadError",
+     "IncompatibleModuleError",
+     "NumericalInstabilityError",
+     "GradientError",
+ ]
+diff --git a/src/layer_analysis/__main__.py b/src/layer_analysis/__main__.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f1c299ac81fde3e493265796e974535905722fd2
+--- /dev/null
++++ b/src/layer_analysis/__main__.py
+@@ -0,0 +1,13 @@
++"""
++Main entry point for running layer_analysis as a package.
++
++Usage:
++    python -m layer_analysis analyze torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
++    python -m layer_analysis generate-notebook torch.nn@LayerNorm --input-shape 2,16 -o analysis.ipynb
++"""
++
++import sys
++from .cli import main
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/layer-analysis-subpackage/analyzers/__init__.py b/src/layer_analysis/analyzers/__init__.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/__init__.py
+rename to src/layer_analysis/analyzers/__init__.py
+diff --git a/layer-analysis-subpackage/analyzers/activation_stats.py b/src/layer_analysis/analyzers/activation_stats.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/activation_stats.py
+rename to src/layer_analysis/analyzers/activation_stats.py
+diff --git a/layer-analysis-subpackage/analyzers/base.py b/src/layer_analysis/analyzers/base.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/base.py
+rename to src/layer_analysis/analyzers/base.py
+diff --git a/layer-analysis-subpackage/analyzers/gradient_analysis.py b/src/layer_analysis/analyzers/gradient_analysis.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/gradient_analysis.py
+rename to src/layer_analysis/analyzers/gradient_analysis.py
+diff --git a/layer-analysis-subpackage/analyzers/gradient_ratios.py b/src/layer_analysis/analyzers/gradient_ratios.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/gradient_ratios.py
+rename to src/layer_analysis/analyzers/gradient_ratios.py
+diff --git a/layer-analysis-subpackage/analyzers/lipschitz.py b/src/layer_analysis/analyzers/lipschitz.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/lipschitz.py
+rename to src/layer_analysis/analyzers/lipschitz.py
+diff --git a/layer-analysis-subpackage/analyzers/numerical_precision.py b/src/layer_analysis/analyzers/numerical_precision.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/numerical_precision.py
+rename to src/layer_analysis/analyzers/numerical_precision.py
+diff --git a/layer-analysis-subpackage/analyzers/operator_norm.py b/src/layer_analysis/analyzers/operator_norm.py
+similarity index 99%
+rename from layer-analysis-subpackage/analyzers/operator_norm.py
+rename to src/layer_analysis/analyzers/operator_norm.py
+index f15677f57dd1900fb4bb7b7c9e0e0bc34d91251c..b8f8086c5994ea313ee45c4a62e7a46ad3c032f8 100644
+--- a/layer-analysis-subpackage/analyzers/operator_norm.py
++++ b/src/layer_analysis/analyzers/operator_norm.py
+@@ -296,51 +296,51 @@ class OperatorNormEstimator(BaseAnalyzer):
+ 
+     def get_notebook_cells(self) -> List[Dict[str, Any]]:
+         """Generate notebook cells for operator norm estimation.
+ 
+         Returns
+         -------
+         List[Dict[str, Any]]
+             Notebook cells.
+         """
+         batch, seq, d_model = (
+             self.input_shape[0] if len(self.input_shape) > 0 else 2,
+             self.input_shape[1] if len(self.input_shape) > 1 else 16,
+             self.input_shape[2] if len(self.input_shape) > 2 else 64,
+         )
+ 
+         return [
+             self._create_markdown_cell(
+                 "## Effective Operator Norm Estimation\n\n"
+                 "Estimate the effective operator norm by computing max(||f(x)|| / ||x||) "
+                 "over various input distributions.\n\n"
+                 "A large operator norm (>> 1) may indicate potential for exploding activations, "
+                 "while a very small norm (<< 1) may indicate vanishing signals."
+             ),
+             self._create_code_cell(
+                 f'''
+-from utilities.layer_analysis.inputs import InputGenerator
++from layer_analysis.inputs import InputGenerator
+ import numpy as np
+ 
+ # Input generator
+ input_gen = InputGenerator(batch_size={batch}, device=device, dtype=dtype)
+ 
+ # Test with various input distributions
+ distributions = ["normal", "uniform", "sparse", "large_magnitude", "small_magnitude", "correlated"]
+ n_samples = 50
+ 
+ operator_norm_estimates = {{}}
+ 
+ for dist_name in distributions:
+     ratios = []
+ 
+     for _ in range(n_samples):
+         # Generate input based on distribution
+         x = input_gen.generate(dist_name, ({batch}, {seq}, {d_model}))
+ 
+         x_norm = torch.linalg.norm(x.flatten())
+         if x_norm < 1e-8:
+             continue
+ 
+         # Forward pass
+         with torch.no_grad():
+             out = module(x)
+diff --git a/layer-analysis-subpackage/analyzers/parameter_norms.py b/src/layer_analysis/analyzers/parameter_norms.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/parameter_norms.py
+rename to src/layer_analysis/analyzers/parameter_norms.py
+diff --git a/layer-analysis-subpackage/analyzers/rank_analysis.py b/src/layer_analysis/analyzers/rank_analysis.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/rank_analysis.py
+rename to src/layer_analysis/analyzers/rank_analysis.py
+diff --git a/layer-analysis-subpackage/analyzers/spectral_analysis.py b/src/layer_analysis/analyzers/spectral_analysis.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/spectral_analysis.py
+rename to src/layer_analysis/analyzers/spectral_analysis.py
+diff --git a/layer-analysis-subpackage/analyzers/weight_distribution.py b/src/layer_analysis/analyzers/weight_distribution.py
+similarity index 100%
+rename from layer-analysis-subpackage/analyzers/weight_distribution.py
+rename to src/layer_analysis/analyzers/weight_distribution.py
+diff --git a/layer-analysis-subpackage/cli.py b/src/layer_analysis/cli.py
+similarity index 89%
+rename from layer-analysis-subpackage/cli.py
+rename to src/layer_analysis/cli.py
+index a5598778cda9cebedbccc6f1cbdb370676d3c525..7534e2cc952541be8f3b753cee9fc9358dba0be9 100644
+--- a/layer-analysis-subpackage/cli.py
++++ b/src/layer_analysis/cli.py
+@@ -1,45 +1,46 @@
+ """
+ Command-Line Interface for Module Initialization Analysis.
+ 
+ Usage:
+     # Single-input module
+-    python -m utilities.layer_analysis analyze models.abstractor@DualAttention --input-shape 2,16,64
++    python -m layer_analysis analyze torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+ 
+-    # Multi-input module (e.g., RelationalAttention needs x and symbols)
+-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
+-        --input-shapes x:2,16,64 symbols:2,16,64
++    # Multi-input module (e.g., MultiheadAttention expects query/key/value)
++    python -m layer_analysis analyze torch.nn@MultiheadAttention \
++        --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
++        --module-kwargs embed_dim=32 num_heads=4
+ 
+     # Module with custom kwargs
+-    python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \
+-        --input-shapes x:2,16,64 --module-kwargs n_symbols=100
++    python -m layer_analysis analyze torch.nn@LayerNorm \
++        --input-shape 2,16 --module-kwargs normalized_shape=16
+ 
+-    # Generate notebook (default output: tests/layer_analysis/DualAttention.ipynb)
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention
++    # Generate notebook (default output: tests/layer_analysis/{module_name}.ipynb)
++    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+ 
+     # Generate Python script
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention --output-format py -o analysis.py
++    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --output-format py -o analysis.py
+ """
+ 
+ import argparse
+ import sys
+ from pathlib import Path
+ from typing import Optional, List, Dict, Any
+ 
+ from .config import AnalysisConfig
+ from .runner import AnalysisRunner
+ from .introspection import load_module_class, get_input_signature
+ from .notebook.generator import NotebookGenerator
+ from .notebook.python_generator import PythonScriptGenerator
+ 
+ 
+ def validate_input_shapes(module_class, input_shapes: Dict[str, Any]) -> None:
+     """Validate that input shapes match the module's forward signature.
+ 
+     Parameters
+     ----------
+     module_class : Type[nn.Module]
+         The module class to check.
+     input_shapes : Dict[str, Any]
+         The provided input shapes.
+ 
+     Raises
+@@ -178,65 +179,66 @@ def parse_module_kwargs(kwargs_list: List[str]) -> Dict[str, Any]:
+             if value.lower() == "true":
+                 value = True
+             elif value.lower() == "false":
+                 value = False
+             # Otherwise keep as string
+ 
+         kwargs[key] = value
+     return kwargs
+ 
+ 
+ def create_parser() -> argparse.ArgumentParser:
+     """Create the argument parser.
+ 
+     Returns
+     -------
+     argparse.ArgumentParser
+         Configured parser.
+     """
+     parser = argparse.ArgumentParser(
+         prog="layer_analysis",
+         description="Module Initialization Analysis Tool",
+         formatter_class=argparse.RawDescriptionHelpFormatter,
+         epilog="""
+ Examples:
+     # Single-input module with custom shape
+-    python -m utilities.layer_analysis analyze models.abstractor@DualAttention --input-shape 4,32,128
++    python -m layer_analysis analyze torch.nn@Linear --input-shape 4,32 --module-kwargs in_features=32 out_features=64
+ 
+-    # Multi-input module (e.g., RelationalAttention needs x and symbols)
+-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \\
+-        --input-shapes x:2,16,64 symbols:2,16,64
++    # Multi-input module (e.g., MultiheadAttention expects query/key/value)
++    python -m layer_analysis analyze torch.nn@MultiheadAttention \\
++        --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \\
++        --module-kwargs embed_dim=32 num_heads=4
+ 
+     # Module with custom kwargs
+-    python -m utilities.layer_analysis analyze models.abstractor@SymbolicAttention \\
+-        --input-shapes x:2,16,64 --module-kwargs n_symbols=100
++    python -m layer_analysis analyze torch.nn@LayerNorm \\
++        --input-shape 2,16 --module-kwargs normalized_shape=16
+ 
+-    # Generate Jupyter notebook (default output: tests/layer_analysis/DualAttention.ipynb)
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention
++    # Generate Jupyter notebook (default output: tests/layer_analysis/{module_name}.ipynb)
++    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+ 
+     # Generate Python script
+-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention --output-format py -o analysis.py
++    python -m layer_analysis generate-notebook torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32 --output-format py -o analysis.py
+         """,
+     )
+ 
+     subparsers = parser.add_subparsers(dest="command", required=True)
+ 
+     # --- analyze command ---
+     analyze_parser = subparsers.add_parser(
+         "analyze",
+         help="Run analysis on a module and print results",
+     )
+     _add_common_args(analyze_parser)
+     analyze_parser.add_argument(
+         "--output",
+         "-o",
+         type=Path,
+         help="Output file for results (JSON or Markdown based on extension)",
+     )
+ 
+     # --- generate-notebook command ---
+     notebook_parser = subparsers.add_parser(
+         "generate-notebook",
+         help="Generate analysis notebook or script",
+     )
+     _add_common_args(notebook_parser)
+     notebook_parser.add_argument(
+@@ -264,51 +266,51 @@ Examples:
+         "--run",
+         action="store_true",
+         help="Run the notebook after generation",
+     )
+ 
+     # --- list-analyses command ---
+     subparsers.add_parser(
+         "list-analyses",
+         help="List available analysis types",
+     )
+ 
+     return parser
+ 
+ 
+ def _add_common_args(parser: argparse.ArgumentParser) -> None:
+     """Add common arguments to a parser.
+ 
+     Parameters
+     ----------
+     parser : argparse.ArgumentParser
+         Parser to add arguments to.
+     """
+     parser.add_argument(
+         "module",
+         type=str,
+-        help="Module identifier (e.g., 'models.abstractor@RelationalAttention')",
++        help="Module identifier (e.g., 'torch.nn@Linear')",
+     )
+     # Support both single shape (backward compat) and multiple shapes
+     shape_group = parser.add_mutually_exclusive_group()
+     shape_group.add_argument(
+         "--input-shape",
+         type=str,
+         default=None,
+         help="Single input shape as comma-separated ints (batch,seq,dim). "
+         "For single-input modules only.",
+     )
+     shape_group.add_argument(
+         "--input-shapes",
+         type=str,
+         nargs="+",
+         default=None,
+         help="Multiple input shapes as 'name:shape' pairs. "
+         "Example: --input-shapes x:2,16,64 symbols:2,16,64",
+     )
+     parser.add_argument(
+         "--device",
+         type=str,
+         default="cuda",
+         choices=["cuda", "cpu"],
+         help="Device for analysis",
+     )
+diff --git a/layer-analysis-subpackage/config.py b/src/layer_analysis/config.py
+similarity index 98%
+rename from layer-analysis-subpackage/config.py
+rename to src/layer_analysis/config.py
+index afdc6ed20b79026384580b0e795b6d7bd5449d5c..64e9555a6b5b81d6cfbdf814ce951bd032f5d791 100644
+--- a/layer-analysis-subpackage/config.py
++++ b/src/layer_analysis/config.py
+@@ -1,48 +1,48 @@
+ """
+ Configuration for Module Initialization Analysis.
+ 
+ This module defines the AnalysisConfig dataclass that controls all analysis
+ parameters and toggles.
+ """
+ 
+ from dataclasses import dataclass, field
+ from typing import List, Tuple, Optional, Dict, Union
+ import torch
+ 
+ 
+ @dataclass
+ class AnalysisConfig:
+     """Configuration for module initialization analysis.
+ 
+     Parameters
+     ----------
+     input_shapes : Dict[str, Tuple[int, ...]]
+         Mapping of input parameter names to their shapes.
+         For single-input modules, use {"x": (batch, seq, d_model)}.
+-        For multi-input modules like RelationalAttention, use
+-        {"x": (2, 16, 64), "symbols": (2, 16, 64)}.
++        For multi-input modules (e.g., query/key/value), use
++        {"query": (2, 8, 32), "key": (2, 8, 32), "value": (2, 8, 32)}.
+     input_shape : Optional[Tuple[int, ...]]
+         Backwards-compatible alias for a single input shape. If provided, it
+         overrides input_shapes.
+     device : str
+         Device string ("cuda" or "cpu").
+     dtype : str
+         Data type string ("float32", "float16", "bfloat16").
+     n_samples : int
+         Number of samples for statistical estimation.
+     input_distributions : List[str]
+         Input distributions to test for operator norm estimation.
+ 
+     Analysis Toggles
+     ----------------
+     run_parameter_norms : bool
+         Run parameter norm analysis (Frobenius, operator, sup, std).
+     run_operator_norm : bool
+         Run effective operator norm estimation.
+     run_gradient_analysis : bool
+         Run gradient existence and norm checks.
+     run_spectral_analysis : bool
+         Run spectral analysis (eigenvalues, condition number).
+     run_rank_analysis : bool
+         Run effective rank analysis.
+     run_lipschitz : bool
+diff --git a/layer-analysis-subpackage/defaults.yaml b/src/layer_analysis/defaults.yaml
+similarity index 100%
+rename from layer-analysis-subpackage/defaults.yaml
+rename to src/layer_analysis/defaults.yaml
+diff --git a/layer-analysis-subpackage/errors.py b/src/layer_analysis/errors.py
+similarity index 99%
+rename from layer-analysis-subpackage/errors.py
+rename to src/layer_analysis/errors.py
+index 5b88dd40fe475fb2ea55a37928712a2cb9f59592..282cdd78e3cc1804ef14262e0ca28280d8a6cb89 100644
+--- a/layer-analysis-subpackage/errors.py
++++ b/src/layer_analysis/errors.py
+@@ -271,51 +271,51 @@ def safe_forward(
+     Supports modules with multiple positional tensor inputs.
+ 
+     Parameters
+     ----------
+     module : torch.nn.Module
+         Module to execute.
+     *args : torch.Tensor
+         Input tensor(s). Can be a single tensor or multiple positional tensors.
+     **kwargs
+         Additional arguments for the forward pass.
+ 
+     Returns
+     -------
+     torch.Tensor
+         Output tensor (first element if tuple).
+ 
+     Raises
+     ------
+     ModuleAnalysisError
+         If forward pass fails.
+ 
+     Examples
+     --------
+     >>> # Single input
+     >>> out = safe_forward(module, x)
+-    >>> # Multiple inputs (e.g., RelationalAttention)
++    >>> # Multiple inputs (e.g., query/key/value)
+     >>> out = safe_forward(module, x, symbols)
+     """
+     try:
+         with torch.no_grad():
+             out = module(*args, **kwargs)
+             if isinstance(out, tuple):
+                 # Return first non-None tensor
+                 for o in out:
+                     if isinstance(o, torch.Tensor):
+                         return o
+                 return out[0]
+             return out
+     except Exception as e:
+         raise ModuleAnalysisError(f"Forward pass failed: {e}")
+ 
+ 
+ def check_for_nan_inf(
+     tensor: torch.Tensor,
+     name: str = "tensor",
+ ) -> None:
+     """Check tensor for NaN or Inf values.
+ 
+     Parameters
+     ----------
+     tensor : torch.Tensor
+diff --git a/layer-analysis-subpackage/inputs/__init__.py b/src/layer_analysis/inputs/__init__.py
+similarity index 100%
+rename from layer-analysis-subpackage/inputs/__init__.py
+rename to src/layer_analysis/inputs/__init__.py
+diff --git a/layer-analysis-subpackage/inputs/generators.py b/src/layer_analysis/inputs/generators.py
+similarity index 100%
+rename from layer-analysis-subpackage/inputs/generators.py
+rename to src/layer_analysis/inputs/generators.py
+diff --git a/layer-analysis-subpackage/introspection.py b/src/layer_analysis/introspection.py
+similarity index 98%
+rename from layer-analysis-subpackage/introspection.py
+rename to src/layer_analysis/introspection.py
+index 68eef999da18488f5476fdb76aebb4f2d81e29a2..f617def1a02c48faca2cc7567990b4c96444603c 100644
+--- a/layer-analysis-subpackage/introspection.py
++++ b/src/layer_analysis/introspection.py
+@@ -3,75 +3,74 @@ Module Introspection Utilities.
+ 
+ This module provides utilities for loading, inspecting, and analyzing
+ PyTorch module classes and instances.
+ """
+ 
+ from typing import Type, Dict, Any, List, Tuple, Optional
+ from pathlib import Path
+ import importlib
+ import inspect
+ import yaml
+ import torch
+ import torch.nn as nn
+ 
+ 
+ def load_module_class(
+     identifier: str,
+     prefix: str = "",
+ ) -> Type[nn.Module]:
+     """Load a module class from an identifier string.
+ 
+     Parameters
+     ----------
+     identifier : str
+         Module identifier in format "module.path@ClassName".
+         Examples:
+-        - "models.abstractor@RelationalAttention"
+         - "torch.nn@Linear"
+     prefix : str
+         Optional prefix to prepend to module path.
+ 
+     Returns
+     -------
+     Type[nn.Module]
+         The loaded module class.
+ 
+     Raises
+     ------
+     ValueError
+         If identifier format is invalid.
+     ModuleNotFoundError
+         If the module path cannot be imported.
+     AttributeError
+         If the class name is not found in the module.
+     TypeError
+         If the class is not an nn.Module subclass.
+ 
+     Examples
+     --------
+-    >>> cls = load_module_class("models.abstractor@RelationalAttention")
+-    >>> module = cls(d_model=64, n_heads=4)
++    >>> cls = load_module_class("torch.nn@Linear")
++    >>> module = cls(in_features=16, out_features=32)
+     """
+     from .errors import ModuleLoadError
+ 
+     if "@" not in identifier:
+         raise ModuleLoadError(
+             identifier,
+             "Identifier must be in format 'module.path@ClassName'",
+         )
+ 
+     module_path, class_name = identifier.split("@", 1)
+ 
+     full_path = prefix + module_path if prefix else module_path
+ 
+     try:
+         module = importlib.import_module(full_path)
+     except ModuleNotFoundError as e:
+         raise ModuleLoadError(identifier, f"Module not found: {e}")
+ 
+     try:
+         cls = getattr(module, class_name)
+     except AttributeError:
+         raise ModuleLoadError(
+             identifier,
+             f"Class '{class_name}' not found in module '{full_path}'",
+         )
+diff --git a/layer-analysis-subpackage/losses.py b/src/layer_analysis/losses.py
+similarity index 100%
+rename from layer-analysis-subpackage/losses.py
+rename to src/layer_analysis/losses.py
+diff --git a/layer-analysis-subpackage/notebook/__init__.py b/src/layer_analysis/notebook/__init__.py
+similarity index 100%
+rename from layer-analysis-subpackage/notebook/__init__.py
+rename to src/layer_analysis/notebook/__init__.py
+diff --git a/layer-analysis-subpackage/notebook/generator.py b/src/layer_analysis/notebook/generator.py
+similarity index 96%
+rename from layer-analysis-subpackage/notebook/generator.py
+rename to src/layer_analysis/notebook/generator.py
+index 3da6866a0f350c3d2b4095d6cba723568eab9cb6..6bd8c70dbd06dc093df28bd2eba4520d3ff76f5f 100644
+--- a/layer-analysis-subpackage/notebook/generator.py
++++ b/src/layer_analysis/notebook/generator.py
+@@ -4,61 +4,65 @@ Notebook Generator.
+ This module provides the NotebookGenerator class for generating Jupyter
+ notebooks for module initialization analysis.
+ """
+ 
+ from typing import List, Dict, Any, Optional
+ from pathlib import Path
+ import json
+ 
+ from ..config import AnalysisConfig
+ from ..introspection import load_module_class, merge_kwargs, validate_kwargs
+ from .templates import (
+     get_title_cells,
+     get_setup_cells,
+     get_module_instantiation_cells,
+     get_summary_cells,
+     get_all_analysis_cells,
+ )
+ 
+ 
+ class NotebookGenerator:
+     """Generate Jupyter notebooks for module initialization analysis.
+ 
+     Parameters
+     ----------
+     module_identifier : str
+-        Module identifier (e.g., "models.abstractor@RelationalAttention").
++        Module identifier (e.g., "torch.nn@Linear").
+     config : AnalysisConfig
+         Analysis configuration.
+     module_kwargs : Optional[Dict[str, Any]]
+         Additional keyword arguments for module instantiation.
+ 
+     Examples
+     --------
+-    >>> from utilities.layer_analysis import AnalysisConfig
+-    >>> config = AnalysisConfig(input_shape=(2, 16, 64))
+-    >>> generator = NotebookGenerator("models.abstractor@DualAttention", config)
++    >>> from layer_analysis import AnalysisConfig
++    >>> config = AnalysisConfig(input_shape=(2, 16))
++    >>> generator = NotebookGenerator(
++    ...     "torch.nn@Linear",
++    ...     config,
++    ...     module_kwargs={"in_features": 16, "out_features": 32},
++    ... )
+     >>> generator.generate(Path("analysis.ipynb"))
+     """
+ 
+     def __init__(
+         self,
+         module_identifier: str,
+         config: AnalysisConfig,
+         module_kwargs: Optional[Dict[str, Any]] = None,
+     ):
+         if "@" not in module_identifier:
+             raise ValueError(
+                 f"Invalid module identifier: {module_identifier}. "
+                 "Expected format: 'module.path@ClassName'"
+             )
+ 
+         self.module_identifier = module_identifier
+         self.config = config
+         self.module_kwargs = module_kwargs or {}
+         self.module_path, self.class_name = module_identifier.split("@", 1)
+ 
+         self._validate_module_kwargs()
+ 
+     def _validate_module_kwargs(self) -> None:
+         """Validate that all required module kwargs are provided.
+ 
+@@ -265,26 +269,26 @@ def create_analysis_notebook(
+ ) -> None:
+     """Convenience function to create an analysis notebook.
+ 
+     Parameters
+     ----------
+     module_identifier : str
+         Module identifier.
+     output_path : Path
+         Output path for notebook.
+     input_shape : tuple
+         Input tensor shape.
+     device : str
+         Device string.
+     dtype : str
+         Data type string.
+     skip_analyses : Optional[List[str]]
+         Analyses to skip.
+     """
+     config = AnalysisConfig(
+         input_shape=input_shape,
+         device=device,
+         dtype=dtype,
+     )
+ 
+     generator = NotebookGenerator(module_identifier, config)
+-    generator.generate(output_path, skip_analyses=skip_analyses)
+\ No newline at end of file
++    generator.generate(output_path, skip_analyses=skip_analyses)
+diff --git a/layer-analysis-subpackage/notebook/python_generator.py b/src/layer_analysis/notebook/python_generator.py
+similarity index 97%
+rename from layer-analysis-subpackage/notebook/python_generator.py
+rename to src/layer_analysis/notebook/python_generator.py
+index 2f00315c75eaa73464afd95b81bdb10347c4fe20..46bcef779c67d4cc263654a0b45a4dfa57a998a0 100644
+--- a/layer-analysis-subpackage/notebook/python_generator.py
++++ b/src/layer_analysis/notebook/python_generator.py
+@@ -1,58 +1,62 @@
+ """
+ Python Script Generator.
+ 
+ This module provides the PythonScriptGenerator class for generating
+ Python scripts for module initialization analysis.
+ """
+ 
+ from typing import List, Optional, Dict, Any
+ from pathlib import Path
+ import textwrap
+ import json
+ 
+ from ..config import AnalysisConfig
+ from ..introspection import load_module_class, merge_kwargs, validate_kwargs
+ 
+ 
+ class PythonScriptGenerator:
+     """Generate Python scripts for module initialization analysis.
+ 
+     Parameters
+     ----------
+     module_identifier : str
+-        Module identifier (e.g., "models.abstractor@RelationalAttention").
++        Module identifier (e.g., "torch.nn@Linear").
+     config : AnalysisConfig
+         Analysis configuration.
+     module_kwargs : Optional[Dict[str, Any]]
+         Additional keyword arguments for module instantiation.
+ 
+     Examples
+     --------
+-    >>> from utilities.layer_analysis import AnalysisConfig
+-    >>> config = AnalysisConfig(input_shape=(2, 16, 64))
+-    >>> generator = PythonScriptGenerator("models.abstractor@DualAttention", config)
++    >>> from layer_analysis import AnalysisConfig
++    >>> config = AnalysisConfig(input_shape=(2, 16))
++    >>> generator = PythonScriptGenerator(
++    ...     "torch.nn@Linear",
++    ...     config,
++    ...     module_kwargs={"in_features": 16, "out_features": 32},
++    ... )
+     >>> generator.generate(Path("analysis.py"))
+     """
+ 
+     def __init__(
+         self,
+         module_identifier: str,
+         config: AnalysisConfig,
+         module_kwargs: Optional[Dict[str, Any]] = None,
+     ):
+         if "@" not in module_identifier:
+             raise ValueError(
+                 f"Invalid module identifier: {module_identifier}. "
+                 "Expected format: 'module.path@ClassName'"
+             )
+ 
+         self.module_identifier = module_identifier
+         self.config = config
+         self.module_kwargs = module_kwargs or {}
+         self.module_path, self.class_name = module_identifier.split("@", 1)
+ 
+         self._validate_module_kwargs()
+ 
+     def _validate_module_kwargs(self) -> None:
+         """Validate that all required module kwargs are provided.
+ 
+@@ -111,64 +115,63 @@ class PythonScriptGenerator:
+ 
+         script_parts.append(self._get_summary())
+         script_parts.append(self._get_main())
+ 
+         script = "\n\n".join(script_parts)
+ 
+         output_path = Path(output_path)
+         output_path.parent.mkdir(parents=True, exist_ok=True)
+ 
+         with open(output_path, "w") as f:
+             f.write(script)
+ 
+     def _get_header(self) -> str:
+         """Get script header."""
+         shapes_str = "\n".join([f"# - {k}: {v}" for k, v in self.config.input_shapes.items()])
+         return f'''#!/usr/bin/env python3
+ """
+ Module Initialization Analysis: {self.class_name}
+ 
+ Module: {self.module_identifier}
+ Input Shapes:
+ {shapes_str}
+ Device: {self.config.device}
+ Dtype: {self.config.dtype}
+ 
+-Generated by utilities.layer_analysis
++Generated by layer_analysis
+ """'''
+ 
+     def _get_imports(self) -> str:
+         """Get import statements."""
+         return '''import sys
+ import os
+ from pathlib import Path
+ 
+-# Add project root to path
++# Add current working directory to import path for local modules
+ project_root = Path(os.getcwd())
+-while not (project_root / "models").exists() and project_root.parent != project_root:
+-    project_root = project_root.parent
+-sys.path.insert(0, str(project_root))
++if str(project_root) not in sys.path:
++    sys.path.insert(0, str(project_root))
+ 
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
+ import numpy as np
+ import matplotlib.pyplot as plt
+ from typing import Dict, List, Any'''
+ 
+     def _get_setup(self) -> str:
+         """Get setup code."""
+         cls = load_module_class(self.module_identifier)
+         # Use primary input shape for default merging
+         module_config_dict = merge_kwargs(
+             cls, self.module_kwargs, self.config.input_shape
+         )
+         module_config_str = "{\n" + "\n".join(
+             f"    {k!r}: {v!r}," for k, v in module_config_dict.items()
+         ) + "\n}"
+         loss_fn = self._get_loss_fn()
+         input_shapes_str = json.dumps(self.config.input_shapes, indent=4)
+ 
+         return f'''# === CONFIGURATION (modify these as needed) ===
+ INPUT_SHAPES = {input_shapes_str}
+ LOSS_FN = {loss_fn!r}
+ MODULE_CONFIG = {module_config_str}
+@@ -610,26 +613,26 @@ def create_module():
+ 
+     def _get_main(self) -> str:
+         """Get main function."""
+         return '''if __name__ == "__main__":
+     print("Module Initialization Analysis")
+     print("=" * 60)
+ 
+     # Create module
+     module = create_module()
+     print(f"Module: {type(module).__name__}")
+     print(f"Parameters: {sum(p.numel() for p in module.parameters()):,}")
+ 
+     # Run analyses
+     results = {}
+     results["param_norms"] = analyze_parameter_norms(module)
+     results["operator_norm"] = estimate_operator_norm(module)
+     results["gradients"] = analyze_gradients(module)
+     results["spectral"] = analyze_spectral(module)
+     results["rank"] = analyze_rank(module)
+     results["lipschitz"] = estimate_lipschitz(module)
+     results["activations"] = analyze_activations(module)
+     results["grad_ratios"] = analyze_gradient_ratios(module)
+     results["precision"] = check_precision(module)
+     analyze_weight_distribution(module)
+ 
+-    print_summary(results)'''
+\ No newline at end of file
++    print_summary(results)'''
+diff --git a/layer-analysis-subpackage/notebook/templates.py b/src/layer_analysis/notebook/templates.py
+similarity index 99%
+rename from layer-analysis-subpackage/notebook/templates.py
+rename to src/layer_analysis/notebook/templates.py
+index 8fc33653abb7c5271dec9fa7d045b5b66fa05789..c899caf450924f348165e2cacc4cc783e6a3e722 100644
+--- a/layer-analysis-subpackage/notebook/templates.py
++++ b/src/layer_analysis/notebook/templates.py
+@@ -44,51 +44,51 @@ def _code_cell(source: str) -> Dict[str, Any]:
+     -------
+     Dict[str, Any]
+         Notebook cell dictionary.
+     """
+     source = textwrap.dedent(source).strip()
+     return {
+         "cell_type": "code",
+         "metadata": {},
+         "source": [line + "\n" for line in source.split("\n")],
+         "outputs": [],
+         "execution_count": None,
+     }
+ 
+ 
+ def get_title_cells(
+     module_identifier: str,
+     input_shapes: Dict[str, Tuple[int, ...]],
+     device: str,
+     dtype: str,
+ ) -> List[Dict[str, Any]]:
+     """Generate title and introduction cells.
+ 
+     Parameters
+     ----------
+     module_identifier : str
+-        Module identifier (e.g., "models.abstractor@RelationalAttention").
++        Module identifier (e.g., "torch.nn@Linear").
+     input_shapes : Dict[str, Tuple[int, ...]]
+         Input tensor shapes.
+     device : str
+         Device string.
+     dtype : str
+         Data type string.
+ 
+     Returns
+     -------
+     List[Dict[str, Any]]
+         Title cells.
+     """
+     module_path, class_name = module_identifier.split("@")
+ 
+     shapes_str = "\n".join([f"- {k}: {v}" for k, v in input_shapes.items()])
+ 
+     return [
+         _markdown_cell(
+             f"# Module Initialization Analysis: {class_name}\n\n"
+             f"**Module**: `{module_identifier}`\n\n"
+             f"**Configuration**:\n"
+             f"{shapes_str}\n"
+             f"- Device: {device}\n"
+             f"- Dtype: {dtype}\n\n"
+             "This notebook analyzes the initialization properties of the module "
+@@ -103,53 +103,52 @@ def get_setup_cells(
+ ) -> List[Dict[str, Any]]:
+     """Generate setup and import cells.
+ 
+     Parameters
+     ----------
+     module_path : str
+         Python module path.
+     class_name : str
+         Class name to import.
+ 
+     Returns
+     -------
+     List[Dict[str, Any]]
+         Setup cells.
+     """
+     return [
+         _markdown_cell("## Setup"),
+         _code_cell(
+             f'''
+ import sys
+ import os
+ from pathlib import Path
+ 
+ # Add project root to path
+ project_root = Path(os.getcwd())
+-while not (project_root / "models").exists() and project_root.parent != project_root:
+-    project_root = project_root.parent
+-sys.path.insert(0, str(project_root))
++if str(project_root) not in sys.path:
++    sys.path.insert(0, str(project_root))
+ 
+ import torch
+ import torch.nn as nn
+ import numpy as np
+ import matplotlib.pyplot as plt
+ from typing import Dict, List, Any
+ 
+ # Import the module to analyze
+ from {module_path} import {class_name}
+ 
+ # Set random seed for reproducibility
+ torch.manual_seed(42)
+ 
+ print(f"PyTorch version: {{torch.__version__}}")
+ print(f"CUDA available: {{torch.cuda.is_available()}}")
+ '''
+         ),
+     ]
+ 
+ 
+ def get_module_instantiation_cells(
+     module_path: str,
+     class_name: str,
+     input_shapes: Dict[str, Tuple[int, ...]],
+     device: str,
+diff --git a/layer-analysis-subpackage/runner.py b/src/layer_analysis/runner.py
+similarity index 98%
+rename from layer-analysis-subpackage/runner.py
+rename to src/layer_analysis/runner.py
+index 898f12c63eb6de422d0301403db0a40a42eef580..3fbe4bb1cfd137a15e5537c50360044c40d90a5b 100644
+--- a/layer-analysis-subpackage/runner.py
++++ b/src/layer_analysis/runner.py
+@@ -37,60 +37,64 @@ def color_text(text: str, color: str) -> str:
+     color : str
+         Color name ('green', 'orange', 'red').
+ 
+     Returns
+     -------
+     str
+         Colorized text.
+     """
+     colors = {
+         "green": "\033[92m",
+         "orange": "\033[93m",
+         "red": "\033[91m",
+         "reset": "\033[0m",
+     }
+     code = colors.get(color, "")
+     reset = colors["reset"] if code else ""
+     return f"{code}{text}{reset}"
+ 
+ 
+ class AnalysisRunner:
+     """Orchestrates module initialization analysis.
+ 
+     Parameters
+     ----------
+     module_identifier : str
+-        Module identifier (e.g., "models.abstractor@RelationalAttention").
++        Module identifier (e.g., "torch.nn@Linear").
+     config : AnalysisConfig
+         Analysis configuration.
+     module_kwargs : Optional[Dict[str, Any]]
+         Keyword arguments for module instantiation.
+ 
+     Examples
+     --------
+-    >>> config = AnalysisConfig(input_shape=(2, 16, 64))
+-    >>> runner = AnalysisRunner("models.abstractor@DualAttention", config)
++    >>> config = AnalysisConfig(input_shape=(2, 16))
++    >>> runner = AnalysisRunner(
++    ...     "torch.nn@Linear",
++    ...     config,
++    ...     module_kwargs={"in_features": 16, "out_features": 32},
++    ... )
+     >>> results = runner.run_all()
+     >>> runner.print_summary(results)
+     """
+ 
+     def __init__(
+         self,
+         module_identifier: str,
+         config: AnalysisConfig,
+         module_kwargs: Optional[Dict[str, Any]] = None,
+     ):
+         self.module_identifier = module_identifier
+         self.config = config
+         self.module_kwargs = module_kwargs or {}
+ 
+         # Load module class
+         self.module_class = load_module_class(module_identifier)
+ 
+         # Create module instance
+         self.module = self._create_module()
+ 
+         # Get device and dtype
+         self.device = config.get_torch_device()
+         self.dtype = config.get_torch_dtype()
+ 
+         # Create input generator
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f53317c2593c286040a24e2d621a50085b7e62c
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,6 @@
++from pathlib import Path
++import sys
++
++SRC_PATH = Path(__file__).resolve().parents[1] / "src"
++if str(SRC_PATH) not in sys.path:
++    sys.path.insert(0, str(SRC_PATH))
+diff --git a/tests/test_inputs.py b/tests/test_inputs.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3af60b996533b70367a733d20915f9a323a35108
+--- /dev/null
++++ b/tests/test_inputs.py
+@@ -0,0 +1,30 @@
++import pytest
++
++
++def require_torch():
++    try:
++        import torch
++    except ModuleNotFoundError:
++        pytest.skip("torch not installed", allow_module_level=False)
++    return torch
++
++
++def test_input_generator_shapes():
++    torch = require_torch()
++    from layer_analysis.inputs.generators import InputGenerator
++
++    gen = InputGenerator(batch_size=2, device=torch.device("cpu"), dtype=torch.float32, seed=42)
++    normal = gen.make_normal(2, 3, 4)
++    uniform = gen.make_uniform(2, 3, 4)
++    assert normal.shape == (2, 3, 4)
++    assert uniform.shape == (2, 3, 4)
++
++
++def test_generate_one_hot_distribution():
++    torch = require_torch()
++    from layer_analysis.inputs.generators import InputGenerator
++
++    gen = InputGenerator(batch_size=2, device=torch.device("cpu"), dtype=torch.float32, seed=0)
++    x = gen.generate("one_hot", (2, 3, 4))
++    assert x.shape == (2, 3, 4)
++    assert x.sum().item() == pytest.approx(2 * 3, rel=0, abs=0)
+diff --git a/tests/test_introspection.py b/tests/test_introspection.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..000fcb90841069d13a77b6279494b694eeb10d52
+--- /dev/null
++++ b/tests/test_introspection.py
+@@ -0,0 +1,36 @@
++import pytest
++
++
++def require_torch():
++    try:
++        import torch
++    except ModuleNotFoundError:
++        pytest.skip("torch not installed", allow_module_level=False)
++    return torch
++
++
++def test_load_module_class_linear():
++    torch = require_torch()
++    from layer_analysis.introspection import load_module_class
++
++    cls = load_module_class("torch.nn@Linear")
++    assert issubclass(cls, torch.nn.Module)
++
++
++def test_get_module_signature_includes_required_fields():
++    torch = require_torch()
++    from layer_analysis.introspection import get_module_signature
++
++    sig = get_module_signature(torch.nn.Linear)
++    assert "in_features" in sig
++    assert sig["in_features"]["required"] is True
++
++
++def test_validate_kwargs_missing_required():
++    require_torch()
++    from layer_analysis.errors import MissingModuleKwargsError
++    from layer_analysis.introspection import load_module_class, validate_kwargs
++
++    cls = load_module_class("torch.nn@Linear")
++    with pytest.raises(MissingModuleKwargsError):
++        validate_kwargs(cls, kwargs={}, user_kwargs={})
+diff --git a/tests/test_runner.py b/tests/test_runner.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a7a66a16bd0fcdf0495f156a285370591319d3cb
+--- /dev/null
++++ b/tests/test_runner.py
+@@ -0,0 +1,38 @@
++import pytest
++
++
++def require_torch():
++    try:
++        import torch
++    except ModuleNotFoundError:
++        pytest.skip("torch not installed", allow_module_level=False)
++    return torch
++
++
++def test_runner_parameter_norms_only():
++    require_torch()
++    from layer_analysis import AnalysisConfig, AnalysisRunner
++
++    config = AnalysisConfig(
++        input_shapes={"x": (2, 16)},
++        device="cpu",
++        run_operator_norm=False,
++        run_gradient_analysis=False,
++        run_spectral_analysis=False,
++        run_rank_analysis=False,
++        run_lipschitz=False,
++        run_activation_stats=False,
++        run_gradient_ratios=False,
++        run_precision_checks=False,
++        run_weight_distribution=False,
++    )
++
++    runner = AnalysisRunner(
++        "torch.nn@Linear",
++        config,
++        module_kwargs={"in_features": 16, "out_features": 32},
++    )
++
++    results = runner.run_all()
++    assert "parameter_norms" in results
++    assert len(results["parameter_norms"]) > 0

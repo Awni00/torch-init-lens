@@ -6,20 +6,25 @@ Provides reusable analysis utilities and CLI tools for generating analysis noteb
 
 Usage:
     # CLI usage
-    python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention
-    python -m utilities.layer_analysis generate-notebook models.abstractor@DualAttention -o analysis.ipynb
+    python -m layer_analysis analyze torch.nn@Linear --input-shape 2,16 --module-kwargs in_features=16 out_features=32
+    python -m layer_analysis generate-notebook torch.nn@LayerNorm --input-shape 2,16 -o analysis.ipynb
 
     # Programmatic usage
-    from utilities.layer_analysis import AnalysisRunner, AnalysisConfig
-    from utilities.layer_analysis.analyzers import ParameterNormAnalyzer
+    from layer_analysis import AnalysisRunner, AnalysisConfig
+    from layer_analysis.analyzers import ParameterNormAnalyzer
 
-    config = AnalysisConfig(input_shape=(2, 16, 64), device="cuda")
-    runner = AnalysisRunner("models.abstractor@DualAttention", config)
+    config = AnalysisConfig(input_shape=(2, 16), device="cpu")
+    runner = AnalysisRunner(
+        "torch.nn@Linear",
+        config,
+        module_kwargs={"in_features": 16, "out_features": 32},
+    )
     results = runner.run_all()
 """
 
 from .config import AnalysisConfig
 from .introspection import load_module_class, get_module_signature, detect_module_type
+from .runner import AnalysisRunner, run_analysis
 from .errors import (
     ModuleAnalysisError,
     ModuleLoadError,
@@ -33,6 +38,8 @@ __version__ = "0.1.0"
 __all__ = [
     # Config
     "AnalysisConfig",
+    "AnalysisRunner",
+    "run_analysis",
     # Introspection
     "load_module_class",
     "get_module_signature",

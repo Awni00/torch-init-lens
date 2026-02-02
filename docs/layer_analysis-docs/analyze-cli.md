@@ -2,7 +2,7 @@
 
 *Version: Commit 6cfdf9853cfaba7813da7064ee01b6c7d0dc0b2e (2026-01-19)*
 
-This document explains the output produced by the `utilities.layer_analysis` CLI tool. This tool is designed to verify that PyTorch modules are well-behaved at initialization, helping to catch issues like vanishing gradients, exploding activations, or poor weight distributions before training begins.
+This document explains the output produced by the `layer_analysis` CLI tool. This tool is designed to verify that PyTorch modules are well-behaved at initialization, helping to catch issues like vanishing gradients, exploding activations, or poor weight distributions before training begins.
 
 ## Output Sections
 
@@ -101,10 +101,11 @@ Statistical analysis of the weight values.
 
 ```bash
 # Basic analysis
-python -m utilities.layer_analysis analyze models.abstractor@DualAttention \
-    --input-shape 2,16,64
+python -m layer_analysis analyze torch.nn@Linear \
+    --input-shape 2,16 --module-kwargs in_features=16 out_features=32
 
 # Analysis with multiple inputs
-python -m utilities.layer_analysis analyze models.abstractor@RelationalAttention \
-    --input-shapes x:2,16,64 symbols:2,16,64
+python -m layer_analysis analyze torch.nn@MultiheadAttention \
+    --input-shapes query:2,8,32 key:2,8,32 value:2,8,32 \
+    --module-kwargs embed_dim=32 num_heads=4
 ```
