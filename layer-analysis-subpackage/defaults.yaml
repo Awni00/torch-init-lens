@@ -1,0 +1,10 @@
+# Default hyperparameter values for layer analysis
+# These are applied only if the parameter exists in the module's __init__ signature
+# Priority: user-provided kwargs > derived values (d_model from input_shape) > these defaults
+#
+# Note: d_model and hidden_size are NOT in this file because they are derived
+# from input_shape[2] dynamically.
+
+n_heads: 4
+dropout: 0.0
+bias: true
